@@ -1,7 +1,11 @@
-use poem::{Route, listener::TcpListener};
-use poem_openapi::{OpenApi, OpenApiService, payload::PlainText};
+use poem::{listener::TcpListener, middleware::Cors, EndpointExt, Route};
+use poem_openapi::OpenApiService;
 
 use clap::Parser;
+
+mod routes;
+use routes::{opds, root};
+
 
 #[derive(Parser, Debug)]
 #[command(name = "citesync-server")]
@@ -38,21 +42,12 @@ struct Args {
     port: u16,
 }
 
-struct App;
-
-#[OpenApi]
-impl App {
-    #[oai(path = "/", method = "get")]
-    async fn index(&self) -> PlainText<String> {
-        PlainText("Welcome to the CiteSync API!".to_string())
-    }
-}
-
 #[tokio::main]
 async fn main() -> Result<(), std::io::Error> {
     let args = Args::parse();
 
-    let api_service = OpenApiService::new(App, "CiteSync", "0.1.0").server(args.url);
+    let api_service =
+        OpenApiService::new((root::Router, opds::Router), "CiteSync", "0.1.0").server(args.url);
     let docs = api_service.swagger_ui();
 
     let mut server = Route::new().nest("/", api_service);
@@ -61,6 +56,6 @@ async fn main() -> Result<(), std::io::Error> {
     }
 
     poem::Server::new(TcpListener::bind(format!("0.0.0.0:{}", args.port)))
-        .run(server)
+        .run(server.with(Cors::new()))
         .await
 }
