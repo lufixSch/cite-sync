@@ -1,4 +1,4 @@
-use poem::{listener::TcpListener, middleware::Cors, EndpointExt, Route};
+use poem::{EndpointExt, Route, listener::TcpListener, middleware::Cors};
 use poem_openapi::OpenApiService;
 
 use clap::Parser;
@@ -6,7 +6,7 @@ use clap::Parser;
 mod routes;
 use routes::{opds, root};
 
-
+/// Command line arguments for the CiteSync server.
 #[derive(Parser, Debug)]
 #[command(name = "citesync-server")]
 #[command(
@@ -14,6 +14,7 @@ use routes::{opds, root};
     about = "Server for organizing and sharing research papers and other citable sources"
 )]
 struct Args {
+    /// URL to the API (make sure to change this when changing the port and using the API docs).
     #[arg(
         short,
         long,
@@ -23,6 +24,7 @@ struct Args {
     )]
     url: String,
 
+    /// Disable the SwaggerUI API docs (/docs).
     #[arg(
         short,
         long,
@@ -32,6 +34,7 @@ struct Args {
     )]
     disable_docs: bool,
 
+    /// The port on which the server listens for requests.
     #[arg(
         short,
         long,
@@ -46,8 +49,11 @@ struct Args {
 async fn main() -> Result<(), std::io::Error> {
     let args = Args::parse();
 
+    // Create an OpenAPI service with the provided API and server URL.
     let api_service =
         OpenApiService::new((root::Router, opds::Router), "CiteSync", "0.1.0").server(args.url);
+
+    // Generate SwaggerUI documentation for the API.
     let docs = api_service.swagger_ui();
 
     let mut server = Route::new().nest("/", api_service);
@@ -55,6 +61,7 @@ async fn main() -> Result<(), std::io::Error> {
         server = server.nest("docs", docs);
     }
 
+    // Start the server with CORS middleware enabled.
     poem::Server::new(TcpListener::bind(format!("0.0.0.0:{}", args.port)))
         .run(server.with(Cors::new()))
         .await
