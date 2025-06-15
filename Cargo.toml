@@ -1,0 +1,29 @@
+[package]
+name = "citesync"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+name = "libcitesync"
+path = "lib/main.rs"
+
+[[bin]]
+name = "citesync"
+path = "client/main.rs"
+
+[[bin]]
+name = "citesync-server"
+path = "server/main.rs"
+
+[dependencies]
+clap = { version = "4.5.40", features = ["suggestions", "color", "cargo", "derive", "env"] }
+color-eyre = "0.6.5"
+eyre = "0.6.12"
+poem = "3.1.11"
+poem-openapi = { version = "5.1.15", features = ["swagger-ui"] }
+rayon = "1.10.0"
+serde = { version = "1.0.219", features = ["derive"] }
+sqlx = { version = "0.8.6", features = ["sqlite"] }
+tokio = { version = "1.45.1", features = ["full"] }
+tracing = "0.1.41"
