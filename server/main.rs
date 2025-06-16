@@ -3,8 +3,9 @@ use poem_openapi::OpenApiService;
 
 use clap::Parser;
 
-mod routes;
-use routes::{opds, root};
+mod tags;
+mod opds;
+mod welcome;
 
 /// Command line arguments for the CiteSync server.
 #[derive(Parser, Debug)]
@@ -51,7 +52,7 @@ async fn main() -> Result<(), std::io::Error> {
 
     // Create an OpenAPI service with the provided API and server URL.
     let api_service =
-        OpenApiService::new((root::Router, opds::Router), "CiteSync", "0.1.0").server(args.url);
+        OpenApiService::new((welcome::Router, opds::Router), "CiteSync", "0.1.0").server(args.url);
 
     // Generate SwaggerUI documentation for the API.
     let docs = api_service.swagger_ui();

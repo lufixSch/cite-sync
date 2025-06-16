@@ -1,6 +1,8 @@
 use clap::crate_version;
 use poem_openapi::{Object, OpenApi, payload::Json};
 
+use super::tags::CategoryTags;
+
 /// Represents a welcome message response.
 #[derive(Object)]
 struct WelcomeMsg {
@@ -13,7 +15,7 @@ struct WelcomeMsg {
 /// Root router for handling API requests.
 pub struct Router;
 
-#[OpenApi]
+#[OpenApi(tag = "CategoryTags::CiteSync")]
 impl Router {
     /// Endpoint to retrieve the welcome message and server version.
     ///
