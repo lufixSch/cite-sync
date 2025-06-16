@@ -9,9 +9,15 @@ use super::{
 
 use crate::tags::CategoryTags;
 
+/// Root router for handling OPDS API requests.
 pub struct Router;
 #[OpenApi(prefix_path = "opds", tag = "CategoryTags::Opds")]
 impl Router {
+    /// Endpoint to retrieve the root navigation catalog in OPDS format.
+    ///
+    /// # Returns
+    ///
+    /// A `PlainText` response containing the serialized OPDS feed.
     #[oai(path = "/", method = "get")]
     async fn index(&self) -> Result<PlainText<String>> {
         let feed: Feed = NavigationCatalog::build(
@@ -52,6 +58,11 @@ impl Router {
         }
     }
 
+    /// Endpoint to retrieve the catalog of newly added publications in OPDS format.
+    ///
+    /// # Returns
+    ///
+    /// A `PlainText` response containing the serialized OPDS feed.
     #[oai(path = "/sort/new", method = "get")]
     async fn catalog(&self) -> Result<PlainText<String>> {
         let feed: Feed = AcquisitionCatalog::build(

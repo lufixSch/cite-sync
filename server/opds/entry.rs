@@ -3,11 +3,26 @@ use libcitesync::item;
 
 use super::catalog::build_mime_type;
 
+/// A trait for converting entries to OPDS format.
+///
+/// # Associated Types
+///
+/// * `E` - The type of entry that can be converted to OPDS format.
 pub trait OpdsEntry {
+    /// Converts an entry to an OPDS `Entry`.
+    ///
+    /// # Returns
+    ///
+    /// An `Entry` object representing the OPDS entry.
     fn to_opds(&self) -> Entry;
 }
 
 impl OpdsEntry for item::ResearchItem {
+    /// Converts a `ResearchItem` to an OPDS `Entry`.
+    ///
+    /// # Returns
+    ///
+    /// An `Entry` object representing the OPDS entry.
     fn to_opds(&self) -> Entry {
         Entry {
             title: self.title.clone().into(),
@@ -36,15 +51,24 @@ impl OpdsEntry for item::ResearchItem {
     }
 }
 
-
+/// Represents a navigation entry in an OPDS catalog.
 pub struct NavigationEntry {
+    /// A unique identifier for the entry.
     pub id: String,
+    /// The title of the entry.
     pub title: String,
+    /// A description of the entry.
     pub description: String,
-    pub location: String
+    /// The location URL of the entry.
+    pub location: String,
 }
 
 impl OpdsEntry for NavigationEntry {
+    /// Converts a `NavigationEntry` to an OPDS `Entry`.
+    ///
+    /// # Returns
+    ///
+    /// An `Entry` object representing the OPDS entry.
     fn to_opds(&self) -> Entry {
         Entry {
             title: self.title.clone().into(),
@@ -63,4 +87,3 @@ impl OpdsEntry for NavigationEntry {
         }
     }
 }
-
