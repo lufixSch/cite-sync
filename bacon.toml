@@ -99,7 +99,7 @@ on_change_strategy = "kill_then_restart"
 
 [jobs.client]
 command = [
-    "cargo", "run", "--bin", "citesync",
+    "RUST_BACKTRACE=1", "cargo", "run", "--bin", "citesync",
 ]
 need_stdout = true
 allow_warnings = true

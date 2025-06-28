@@ -11,6 +11,7 @@ use crate::tags::CategoryTags;
 
 /// Root router for handling OPDS API requests.
 pub struct Router;
+
 #[OpenApi(prefix_path = "opds", tag = "CategoryTags::Opds")]
 impl Router {
     /// Endpoint to retrieve the root navigation catalog in OPDS format.

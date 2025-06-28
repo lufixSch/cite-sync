@@ -1,0 +1,5 @@
+procs:
+  clippy:
+    shell: "bacon clippy"
+  server:
+    shell: "bacon server"

@@ -2,9 +2,12 @@ use poem::{EndpointExt, Route, listener::TcpListener, middleware::Cors};
 use poem_openapi::OpenApiService;
 
 use clap::Parser;
+use eyre::{Result, eyre};
+use sqlx::SqlitePool;
 
-mod tags;
+mod items;
 mod opds;
+mod tags;
 mod welcome;
 
 /// Command line arguments for the CiteSync server.
@@ -44,15 +47,32 @@ struct Args {
         default_value_t = 3000
     )]
     port: u16,
+
+    /// Database URL/Connection string
+    #[arg(
+        long,
+        help = "Database URL/Connection string",
+        env = "CITESYNC_DATABASE",
+        default_value_t = String::from("sqlite:citesync.db")
+    )]
+    database_url: String,
 }
 
 #[tokio::main]
-async fn main() -> Result<(), std::io::Error> {
+async fn main() -> Result<()> {
     let args = Args::parse();
 
     // Create an OpenAPI service with the provided API and server URL.
-    let api_service =
-        OpenApiService::new((welcome::Router, opds::Router), "CiteSync", "0.1.0").server(args.url);
+    let api_service = OpenApiService::new(
+        (welcome::Router, opds::Router, items::Router),
+        "CiteSync",
+        "0.1.0",
+    )
+    .server(args.url);
+
+    let db = SqlitePool::connect(&args.database_url)
+        .await
+        .map_err(|e| eyre!(format!("Database connection failed with error: {e}")))?;
 
     // Generate SwaggerUI documentation for the API.
     let docs = api_service.swagger_ui();
@@ -64,6 +84,7 @@ async fn main() -> Result<(), std::io::Error> {
 
     // Start the server with CORS middleware enabled.
     poem::Server::new(TcpListener::bind(format!("0.0.0.0:{}", args.port)))
-        .run(server.with(Cors::new()))
+        .run(server.with(Cors::new()).data(db))
         .await
+        .map_err(|e| eyre!(format!("Server failed with error: {e}")))
 }

@@ -1,4 +1,9 @@
+use poem_openapi::{Enum, Object};
+use std::{fmt::Display, str::FromStr};
+
 use mime::Mime;
+
+use crate::errors::EnumConversionError;
 
 /// Trait for creating instances from bibliography data.
 pub trait Bibliography {
@@ -6,7 +11,7 @@ pub trait Bibliography {
 }
 
 /// Represents the type of a research item.
-#[derive(Default)]
+#[derive(Default, Enum)]
 pub enum ItemType {
     /// An article, such as a journal paper.
     Article,
@@ -16,7 +21,35 @@ pub enum ItemType {
     Misc,
 }
 
+impl Display for ItemType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{:?}",
+            match self {
+                ItemType::Article => "article",
+                ItemType::Misc => "misc",
+            }
+        )
+    }
+}
+
+impl FromStr for ItemType {
+    type Err = EnumConversionError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s == "article" {
+            Ok(ItemType::Article)
+        } else if s == "misc" {
+            Ok(ItemType::Misc)
+        } else {
+            Err(EnumConversionError)
+        }
+    }
+}
+
 /// Represents an author of a research item.
+#[derive(Object)]
 pub struct Author {
     /// The first name of the author.
     pub first_name: String,
@@ -25,11 +58,39 @@ pub struct Author {
 }
 
 /// Represents the type of a file associated with a research item.
+#[derive(Enum)]
 pub enum FileType {
     /// A document, such as a PDF or Word file.
     Document,
     /// A snapshot of a webpage in a format such as an image or html file.
-    Snapshot
+    Snapshot,
+}
+
+impl Display for FileType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{:?}",
+            match self {
+                FileType::Document => "document",
+                FileType::Snapshot => "snapshot",
+            }
+        )
+    }
+}
+
+impl FromStr for FileType {
+    type Err = EnumConversionError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s == "document" {
+            Ok(FileType::Document)
+        } else if s == "snapshot" {
+            Ok(FileType::Snapshot)
+        } else {
+            Err(EnumConversionError)
+        }
+    }
 }
 
 /// Represents a file associated with a research item.
@@ -58,12 +119,13 @@ impl File {
 }
 
 /// Represents a research item, such as an article or paper.
-#[derive(Default)]
+#[derive(Default, Object)]
 pub struct ResearchItem {
+    /// The unique identifier for the research item (usually the key in the bibtex format)
+    pub id: String,
+
     /// A list of authors of the research item.
     pub authors: Vec<Author>,
-    /// The unique identifier for the research item.
-    pub id: String,
     /// The title of the research item.
     pub title: String,
     /// An optional summary or abstract of the research item.
@@ -74,5 +136,6 @@ pub struct ResearchItem {
     pub kind: ItemType,
 
     /// A list of files associated with the research item.
-    pub files: Vec<File>
+    #[oai(skip = true)]
+    pub files: Vec<File>,
 }
