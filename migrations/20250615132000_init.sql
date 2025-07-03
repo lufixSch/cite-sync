@@ -6,7 +6,7 @@
 -- );
 
 CREATE TABLE items (
-    id TEXT PRIMARY KEY UNIQUE,
+    id TEXT PRIMARY KEY UNIQUE NOT NULL,
     title TEXT NOT NULL,
     summary TEXT,
     publisher TEXT,
@@ -14,7 +14,7 @@ CREATE TABLE items (
 );
 
 CREATE TABLE authors (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
     first_name TEXT NOT NULL,
     last_name TEXT NOT NULL
 );
@@ -28,7 +28,7 @@ CREATE TABLE author_item (
 );
 
 CREATE TABLE files (
-    id TEXT PRIMARY KEY,
+    id TEXT PRIMARY KEY NOT NULL,
     mime_type TEXT NOT NULL,
     kind TEXT NOT NULL,
     item_id INTEGER NOT NULL,

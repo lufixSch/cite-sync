@@ -25,7 +25,7 @@ impl Display for ItemType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{:?}",
+            "{}",
             match self {
                 ItemType::Article => "article",
                 ItemType::Misc => "misc",
@@ -38,6 +38,8 @@ impl FromStr for ItemType {
     type Err = EnumConversionError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        dbg!(s);
+
         if s == "article" {
             Ok(ItemType::Article)
         } else if s == "misc" {

@@ -24,6 +24,25 @@ impl OpdsEntry for item::ResearchItem {
     ///
     /// An `Entry` object representing the OPDS entry.
     fn to_opds(&self) -> Entry {
+        let links = if !self.files.is_empty() {
+            self.files
+                .iter()
+                .map(|file| Link {
+                    rel: "http://opds-spec.org/acquisition".into(),
+                    href: file.get_url(self.id.clone()),
+                    mime_type: Some(file.mime_type.essence_str().into()),
+                    ..Default::default()
+                })
+                .collect()
+        } else {
+            vec![Link {
+                rel: "http://opds-spec.org/acquisition".into(),
+                href: "/content/none".into(),
+                mime_type: Some(mime::TEXT_PLAIN.essence_str().into()),
+                ..Default::default()
+            }]
+        };
+
         Entry {
             title: self.title.clone().into(),
             id: self.id.clone(),
@@ -36,16 +55,7 @@ impl OpdsEntry for item::ResearchItem {
                     ..Default::default()
                 })
                 .collect(),
-            links: self
-                .files
-                .iter()
-                .map(|file| Link {
-                    rel: "http://opds-spec.org/acquisition".into(),
-                    href: file.get_url(self.id.clone()),
-                    mime_type: Some(file.mime_type.essence_str().into()),
-                    ..Default::default()
-                })
-                .collect(),
+            links: links,
             ..Default::default()
         }
     }

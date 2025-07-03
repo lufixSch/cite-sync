@@ -1,14 +1,11 @@
 use std::str::FromStr;
 
-use eyre::{Result, eyre};
+use eyre::Result;
 use libcitesync::item::{Author, File, FileType, ItemType, ResearchItem};
 use sqlx::SqlitePool;
 
 pub async fn create(db: &SqlitePool, item: ResearchItem) -> Result<(), eyre::Error> {
-    let item_kind = match item.kind {
-        ItemType::Article => "Article",
-        ItemType::Misc => "Misc",
-    };
+    let item_kind = item.kind.to_string();
 
     // Insert into items table and get the last inserted row id
     sqlx::query!(
@@ -102,7 +99,7 @@ pub async fn read(db: &SqlitePool, id: String) -> Result<ResearchItem, eyre::Err
         .into_iter()
         .map(|file| {
             Ok::<File, eyre::Error>(File {
-                id: file.id.ok_or(eyre!("Encountered File without ID!"))?, // Should never be NONE
+                id: file.id,
                 mime_type: file.mime_type.parse()?,
                 kind: FileType::from_str(file.kind.as_str())?,
             })
@@ -110,7 +107,7 @@ pub async fn read(db: &SqlitePool, id: String) -> Result<ResearchItem, eyre::Err
         .collect::<Result<Vec<_>>>()?;
 
     let item = ResearchItem {
-        id: item_row.id.ok_or(eyre!("Encountered Item without ID!"))?, // Should never be NONE
+        id: item_row.id,
         title: item_row.title,
         summary: item_row.summary,
         publisher: item_row.publisher,

@@ -1,7 +1,6 @@
 use poem::web::Data;
-use poem_openapi::{ApiResponse, OpenApi, payload::Json};
+use poem_openapi::{ApiResponse, OpenApi, param::Path, payload::Json};
 use sqlx::SqlitePool;
-use uuid::Uuid;
 
 use super::database;
 use crate::tags::CategoryTags;
@@ -20,6 +19,15 @@ enum ReadAllResponse {
 }
 
 #[derive(ApiResponse)]
+enum ReadResponse {
+    #[oai(status = 200)]
+    Ok(Json<ResearchItem>),
+
+    #[oai(status = 404)]
+    NotFound,
+}
+
+#[derive(ApiResponse)]
 enum CreateBulkResponse {
     #[oai(status = 200)]
     Ok(Json<Vec<String>>),
@@ -32,14 +40,10 @@ enum CreateBulkResponse {
 impl Router {
     #[oai(path = "/", method = "get")]
     async fn read_all(&self, db: Data<&SqlitePool>) -> ReadAllResponse {
-        let result = sqlx::query!("SELECT title FROM items",)
-            .fetch_all(db.0)
-            .await;
+        let result = sqlx::query!("SELECT id FROM items",).fetch_all(db.0).await;
 
         match result {
-            Ok(items) => {
-                ReadAllResponse::Ok(Json(items.into_iter().map(|item| item.title).collect()))
-            }
+            Ok(items) => ReadAllResponse::Ok(Json(items.into_iter().map(|item| item.id).collect())),
             Err(_) => ReadAllResponse::InternalError,
         }
     }
@@ -55,12 +59,19 @@ impl Router {
         for item in items.0 {
             ids.push(item.id.clone());
 
-            if let Err(e) = database::create(db.0, item).await {
-                dbg!(e);
+            if database::create(db.0, item).await.is_err() {
                 return CreateBulkResponse::InternalError;
             }
         }
 
         CreateBulkResponse::Ok(Json(ids))
+    }
+
+    #[oai(path = "/:id", method = "get")]
+    async fn read(&self, db: Data<&SqlitePool>, id: Path<String>) -> ReadResponse {
+        match database::read(db.0, id.0).await {
+            Ok(item) => ReadResponse::Ok(Json(item)),
+            Err(_) => ReadResponse::NotFound,
+        }
     }
 }

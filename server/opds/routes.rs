@@ -1,6 +1,13 @@
+use std::str::FromStr;
+
 use atom_syndication::Feed;
-use poem::{Error, Result, http::StatusCode};
-use poem_openapi::{OpenApi, payload::PlainText};
+use libcitesync::item::{ItemType, ResearchItem};
+use poem::{Error, Result, http::StatusCode, web::Data};
+use poem_openapi::{
+    OpenApi,
+    payload::{PlainText, Response},
+};
+use sqlx::SqlitePool;
 
 use super::{
     catalog::{self, AcquisitionCatalog, CatalogLocations, NavigationCatalog, OpdsCatalog},
@@ -20,7 +27,7 @@ impl Router {
     ///
     /// A `PlainText` response containing the serialized OPDS feed.
     #[oai(path = "/", method = "get")]
-    async fn index(&self) -> Result<PlainText<String>> {
+    async fn index(&self) -> Result<Response<PlainText<String>>> {
         let feed: Feed = NavigationCatalog::build(
             "0".into(),
             "CiteSync".into(),
@@ -31,27 +38,29 @@ impl Router {
             vec![
                 NavigationEntry {
                     id: "1".into(),
-                    title: "Last Added".into(),
-                    description: "Newly added publications".into(),
-                    location: "/opds/sort/new".into(),
+                    title: "Alphabetical".into(),
+                    description: "Sorted alphabetically".into(),
+                    location: "/opds/sort/name".into(),
                 },
                 NavigationEntry {
                     id: "2".into(),
-                    title: "Alphabetical".into(),
-                    description: "Sorted alphabetically".into(),
-                    location: "/opds/sort/alphabetical".into(),
+                    title: "Authors".into(),
+                    description: "Grouped by authors".into(),
+                    location: "/opds/filter/authors".into(),
                 },
                 NavigationEntry {
                     id: "3".into(),
-                    title: "Authors".into(),
-                    description: "Grouped by Authors".into(),
-                    location: "/opds/filter/authors".into(),
+                    title: "Publisher".into(),
+                    description: "Grouped by publishers".into(),
+                    location: "/opds/sort/publisher".into(),
                 },
             ],
         );
 
         match catalog::serialize(feed) {
-            Ok(feed_str) => Ok(PlainText(feed_str)),
+            Ok(feed_str) => {
+                Ok(Response::new(PlainText(feed_str)).header("Content-type", "text/xml"))
+            }
             Err(_) => Err(Error::from_string(
                 "Unable to serialize feed!",
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -59,25 +68,58 @@ impl Router {
         }
     }
 
-    /// Endpoint to retrieve the catalog of newly added publications in OPDS format.
+    /// Endpoint to retrieve the catalog of publications sorted by name.
     ///
     /// # Returns
     ///
     /// A `PlainText` response containing the serialized OPDS feed.
-    #[oai(path = "/sort/new", method = "get")]
-    async fn catalog(&self) -> Result<PlainText<String>> {
+    #[oai(path = "/sort/name", method = "get")]
+    async fn catalog(&self, db: Data<&SqlitePool>) -> Result<Response<PlainText<String>>> {
+        let result = match sqlx::query!("SELECT id, title, summary, publisher, kind FROM items",)
+            .fetch_all(db.0)
+            .await
+        {
+            Ok(results) => Ok(results),
+            Err(_) => Err(Error::from_string(
+                "Unable to fetch entries!",
+                StatusCode::INTERNAL_SERVER_ERROR,
+            )),
+        }?;
+
+        let entries = result
+            .into_iter()
+            .map(|e| {
+                Ok::<ResearchItem, Error>(ResearchItem {
+                    id: e.id,
+                    authors: vec![],
+                    title: e.title,
+                    summary: e.summary,
+                    publisher: e.publisher,
+                    kind: ItemType::from_str(e.kind.as_str()).map_err(|_| {
+                        Error::from_string(
+                            "Failed parsing data from database!",
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                        )
+                    })?,
+                    files: vec![],
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+
         let feed: Feed = AcquisitionCatalog::build(
             "1".into(),
-            "Last Added".into(),
+            "Alphabetically".into(),
             CatalogLocations {
-                current: "/opds/sort/new".into(),
+                current: "/opds/sort/name".into(),
                 parent: Some("/opds".into()),
             },
-            vec![],
+            entries,
         );
 
         match catalog::serialize(feed) {
-            Ok(feed_str) => Ok(PlainText(feed_str)),
+            Ok(feed_str) => {
+                Ok(Response::new(PlainText(feed_str)).header("Content-type", "text/xml"))
+            }
             Err(_) => Err(Error::from_string(
                 "Unable to serialize feed!",
                 StatusCode::INTERNAL_SERVER_ERROR,

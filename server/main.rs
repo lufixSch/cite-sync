@@ -56,6 +56,15 @@ struct Args {
         default_value_t = String::from("sqlite:citesync.db")
     )]
     database_url: String,
+
+    /// Database URL/Connection string
+    #[arg(
+        long,
+        help = "Path to CiteSync data",
+        env = "CITESYNC_DATA_DIR",
+        default_value_t = String::from("data")
+    )]
+    data_dir: String,
 }
 
 #[tokio::main]
@@ -84,7 +93,7 @@ async fn main() -> Result<()> {
 
     // Start the server with CORS middleware enabled.
     poem::Server::new(TcpListener::bind(format!("0.0.0.0:{}", args.port)))
-        .run(server.with(Cors::new()).data(db))
+        .run(server.with(Cors::new()).data(db).data(args.data_dir))
         .await
         .map_err(|e| eyre!(format!("Server failed with error: {e}")))
 }
