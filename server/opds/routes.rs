@@ -18,7 +18,7 @@ use super::{
     entry::NavigationEntry,
 };
 
-use crate::tags::CategoryTags;
+use crate::{state::CiteSyncPaths, tags::CategoryTags};
 
 /// Root router for handling OPDS API requests.
 pub struct Router;
@@ -130,18 +130,16 @@ impl Router {
     //         )),
     //     }
     // }
-    async fn catalog_by_name(&self, bib_path: Data<&String>) -> Result<Response<PlainText<String>>> {
-        let path = Path::new(bib_path.0);
-        let bibliography = bib::load_json(path).map_err(|_| {
+    async fn catalog_by_name(&self, paths: Data<&CiteSyncPaths>) -> Result<Response<PlainText<String>>> {
+        let path = Path::new(&paths.0.bib_path);
+        let bibliography = bib::load_json(path).map_err(|e| {
             Error::from_string(
-                "Unable to load bibliography!",
+                format!("Unable to load bibliography: {e}"),
                 StatusCode::INTERNAL_SERVER_ERROR,
             )
         })?;
 
         let entries = Bibliography::from_json(bibliography).ok_or(Error::from_string("Unable to deserialize bibliography!", StatusCode::INTERNAL_SERVER_ERROR))?;
-
-        dbg!(entries.len());
 
         let feed: Feed = AcquisitionCatalog::build(
             "1".into(),

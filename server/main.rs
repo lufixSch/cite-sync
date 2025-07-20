@@ -1,16 +1,21 @@
 use std::path::Path;
 
-use poem::{EndpointExt, Route, listener::TcpListener, middleware::Cors};
+use poem::{listener::TcpListener, middleware::{Cors, Tracing}, EndpointExt, Route};
 use poem_openapi::OpenApiService;
 
 use clap::Parser;
 use eyre::{Result, eyre};
 use sqlx::SqlitePool;
 
+use crate::state::CiteSyncPaths;
+
 // mod items;
+mod content;
 mod opds;
 mod tags;
 mod welcome;
+
+mod state;
 
 /// Command line arguments for the CiteSync server.
 #[derive(Parser, Debug)]
@@ -80,6 +85,13 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    if std::env::var_os("RUST_LOG").is_none() {
+        unsafe {
+            std::env::set_var("RUST_LOG", "poem=trace");
+        }
+    }
+    tracing_subscriber::fmt::init();
+
     let args = Args::parse();
 
     // Create an OpenAPI service with the provided API and server URL.
@@ -87,7 +99,7 @@ async fn main() -> Result<()> {
         (
             welcome::Router,
             opds::Router,
-            // items::Router
+            content::Router, // items::Router
         ),
         "CiteSync",
         "0.1.0",
@@ -106,15 +118,24 @@ async fn main() -> Result<()> {
         server = server.nest("docs", docs);
     }
 
-    let bib_path = Path::new(&args.data_dir).join(args.bib_path).to_string_lossy().to_string();
+    let bib_path = Path::new(&args.data_dir)
+        .join(args.bib_path)
+        .to_string_lossy()
+        .to_string();
+
+    let paths = state::CiteSyncPaths {
+        data_dir: args.data_dir,
+        bib_path,
+    };
 
     // Start the server with CORS middleware enabled.
     poem::Server::new(TcpListener::bind(format!("0.0.0.0:{}", args.port)))
         .run(
             server
                 .with(Cors::new())
+                .with(Tracing)
                 //.data(db)
-                .data(bib_path),
+                .data(paths),
         )
         .await
         .map_err(|e| eyre!(format!("Server failed with error: {e}")))

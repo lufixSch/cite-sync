@@ -8,4 +8,7 @@ pub enum CategoryTags {
 
     /// OPDS Server routes
     Opds,
+
+    /// Content routes
+    Content,
 }

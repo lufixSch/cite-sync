@@ -26,6 +26,7 @@ directories-next = "2.0.0"
 eyre = "0.6.12"
 glob = "0.3.2"
 mime = "0.3.17"
+mime_guess = "2.0.5"
 poem = "3.1.11"
 poem-openapi = { version = "5.1.15", features = ["swagger-ui"] }
 ratatui = "0.29.0"

@@ -1,4 +1,4 @@
-use biblatex::{self, ChunksExt, EntryType};
+use biblatex::{self, ChunksExt};
 use eyre::{Result, eyre};
 use poem_openapi::{Enum, Object};
 use serde_json::Value;
@@ -106,12 +106,13 @@ impl FromStr for FileType {
 
 /// Represents a file associated with a research item.
 pub struct File {
-    /// The unique identifier for the file.
+    /// The unique identifier/path for the file.
     pub id: String,
     /// The MIME type of the file.
     pub mime_type: Mime,
-    /// The kind of the file (e.g., document, snapshot).
-    pub kind: FileType,
+
+    // The kind of the file (e.g., document, snapshot).
+    // TODO: pub kind: FileType,
 }
 
 impl File {
@@ -125,7 +126,7 @@ impl File {
     ///
     /// A `String` representing the URL to access the file.
     pub fn get_url(&self, item_id: String) -> String {
-        format!("/content/{item_id}/{}", self.id)
+        format!("/content/{}", self.id)
     }
 }
 
@@ -197,16 +198,20 @@ impl Bibliography for ResearchItem {
                     Some::<ResearchItem>(ResearchItem {
                         id: b["citationKey"].as_str()?.to_string(),
                         title: b["title"].as_str()?.to_string(),
-                        authors: b["creators"].as_array()?.iter().flat_map(|c| {
-                            if c["creatorType"].as_str()? == "author" {
-                                Some(Author {
-                                    first_name: c["firstName"].as_str()?.to_string(),
-                                    last_name: c["lastName"].as_str()?.to_string()
-                                })
-                            } else {
-                                None
-                            }
-                        }).collect(),
+                        authors: b["creators"]
+                            .as_array()?
+                            .iter()
+                            .flat_map(|c| {
+                                if c["creatorType"].as_str()? == "author" {
+                                    Some(Author {
+                                        first_name: c["firstName"].as_str()?.to_string(),
+                                        last_name: c["lastName"].as_str()?.to_string(),
+                                    })
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect(),
                         publisher: b["publisher"].as_str().map(|p| p.to_string()),
                         summary: b["abstractNote"].as_str().map(|p| p.to_string()),
                         kind: {
@@ -228,7 +233,22 @@ impl Bibliography for ResearchItem {
                                 Some(f) => f.to_uppercase().collect::<String>() + chars.as_str(),
                             }
                         },
-                        files: vec![],
+                        files: b["attachments"]
+                            .as_array()?
+                            .iter()
+                            .flat_map(|f| {
+                                let abs_path = f["path"].as_str()?.to_string();
+                                let idx = abs_path.find("storage/")?;
+
+                                let path = abs_path.split_at(idx + "storage/".len()).1.to_string();
+                                let mime_guess = mime_guess::from_path(&path);
+
+                                Some(File {
+                                    id: path,
+                                    mime_type: mime_guess.first_or_octet_stream()
+                                })
+                            })
+                            .collect::<Vec<File>>(),
                     })
                 })
                 .collect::<Vec<ResearchItem>>(),
