@@ -1,7 +1,11 @@
-use std::str::FromStr;
+use std::{path::Path, str::FromStr};
 
 use atom_syndication::Feed;
-use libcitesync::item::{ItemType, ResearchItem};
+use eyre::eyre;
+use libcitesync::{
+    bib,
+    item::{Bibliography, ItemType, ResearchItem},
+};
 use poem::{Error, Result, http::StatusCode, web::Data};
 use poem_openapi::{
     OpenApi,
@@ -74,37 +78,70 @@ impl Router {
     ///
     /// A `PlainText` response containing the serialized OPDS feed.
     #[oai(path = "/sort/name", method = "get")]
-    async fn catalog(&self, db: Data<&SqlitePool>) -> Result<Response<PlainText<String>>> {
-        let result = match sqlx::query!("SELECT id, title, summary, publisher, kind FROM items",)
-            .fetch_all(db.0)
-            .await
-        {
-            Ok(results) => Ok(results),
-            Err(_) => Err(Error::from_string(
-                "Unable to fetch entries!",
+    // async fn catalog(&self, db: Data<&SqlitePool>) -> Result<Response<PlainText<String>>> {
+    //     let result = match sqlx::query!("SELECT id, title, summary, publisher, kind FROM items",)
+    //         .fetch_all(db.0)
+    //         .await
+    //     {
+    //         Ok(results) => Ok(results),
+    //         Err(_) => Err(Error::from_string(
+    //             "Unable to fetch entries!",
+    //             StatusCode::INTERNAL_SERVER_ERROR,
+    //         )),
+    //     }?;
+    //
+    //     let entries = result
+    //         .into_iter()
+    //         .map(|e| {
+    //             Ok::<ResearchItem, Error>(ResearchItem {
+    //                 id: e.id,
+    //                 authors: vec![],
+    //                 title: e.title,
+    //                 summary: e.summary,
+    //                 publisher: e.publisher,
+    //                 kind: ItemType::from_str(e.kind.as_str()).map_err(|_| {
+    //                     Error::from_string(
+    //                         "Failed parsing data from database!",
+    //                         StatusCode::INTERNAL_SERVER_ERROR,
+    //                     )
+    //                 })?,
+    //                 files: vec![],
+    //             })
+    //         })
+    //         .collect::<Result<Vec<_>>>()?;
+    //
+    //     let feed: Feed = AcquisitionCatalog::build(
+    //         "1".into(),
+    //         "Alphabetically".into(),
+    //         CatalogLocations {
+    //             current: "/opds/sort/name".into(),
+    //             parent: Some("/opds".into()),
+    //         },
+    //         entries,
+    //     );
+    //
+    //     match catalog::serialize(feed) {
+    //         Ok(feed_str) => {
+    //             Ok(Response::new(PlainText(feed_str)).header("Content-type", "text/xml"))
+    //         }
+    //         Err(_) => Err(Error::from_string(
+    //             "Unable to serialize feed!",
+    //             StatusCode::INTERNAL_SERVER_ERROR,
+    //         )),
+    //     }
+    // }
+    async fn catalog_by_name(&self, bib_path: Data<&String>) -> Result<Response<PlainText<String>>> {
+        let path = Path::new(bib_path.0);
+        let bibliography = bib::load_json(path).map_err(|_| {
+            Error::from_string(
+                "Unable to load bibliography!",
                 StatusCode::INTERNAL_SERVER_ERROR,
-            )),
-        }?;
+            )
+        })?;
 
-        let entries = result
-            .into_iter()
-            .map(|e| {
-                Ok::<ResearchItem, Error>(ResearchItem {
-                    id: e.id,
-                    authors: vec![],
-                    title: e.title,
-                    summary: e.summary,
-                    publisher: e.publisher,
-                    kind: ItemType::from_str(e.kind.as_str()).map_err(|_| {
-                        Error::from_string(
-                            "Failed parsing data from database!",
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                        )
-                    })?,
-                    files: vec![],
-                })
-            })
-            .collect::<Result<Vec<_>>>()?;
+        let entries = Bibliography::from_json(bibliography).ok_or(Error::from_string("Unable to deserialize bibliography!", StatusCode::INTERNAL_SERVER_ERROR))?;
+
+        dbg!(entries.len());
 
         let feed: Feed = AcquisitionCatalog::build(
             "1".into(),

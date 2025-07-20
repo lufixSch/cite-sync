@@ -1,4 +1,7 @@
+use biblatex::{self, ChunksExt, EntryType};
+use eyre::{Result, eyre};
 use poem_openapi::{Enum, Object};
+use serde_json::Value;
 use std::{fmt::Display, str::FromStr};
 
 use mime::Mime;
@@ -7,7 +10,13 @@ use crate::errors::EnumConversionError;
 
 /// Trait for creating instances from bibliography data.
 pub trait Bibliography {
-    fn from_bib() -> Self;
+    fn from_bib(bibliography: biblatex::Bibliography) -> Vec<Self>
+    where
+        Self: std::marker::Sized;
+
+    fn from_json(bibliography: Value) -> Option<Vec<Self>>
+    where
+        Self: std::marker::Sized;
 }
 
 /// Represents the type of a research item.
@@ -135,9 +144,94 @@ pub struct ResearchItem {
     /// An optional publisher of the research item.
     pub publisher: Option<String>,
     /// The type of the research item (e.g., article, miscellaneous).
-    pub kind: ItemType,
+    pub kind: String, // TODO: ItemKind
 
     /// A list of files associated with the research item.
     #[oai(skip = true)]
     pub files: Vec<File>,
+}
+
+impl Bibliography for ResearchItem {
+    fn from_bib(bibliography: biblatex::Bibliography) -> Vec<Self>
+    where
+        Self: std::marker::Sized,
+    {
+        bibliography
+            .iter()
+            .flat_map(|b| {
+                Ok::<ResearchItem, eyre::Report>(ResearchItem {
+                    id: b.key.clone(),
+                    title: b
+                        .title()
+                        .map_err(|_| eyre!("Bibliography Item has no Title"))?
+                        .parse()
+                        .map_err(|_| eyre!("Unable to parse Title"))?,
+                    authors: b
+                        .author()
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|a| Author {
+                            first_name: a.given_name,
+                            last_name: a.name,
+                        })
+                        .collect(),
+                    publisher: None,
+                    summary: Some(String::from("")), // TODO: b.abstract_()?.parse()?,
+                    kind: b.entry_type.to_string(),
+                    files: vec![],
+                })
+            })
+            .collect::<Vec<ResearchItem>>()
+    }
+
+    fn from_json(bibliography: Value) -> Option<Vec<Self>>
+    where
+        Self: std::marker::Sized,
+    {
+        Some(
+            bibliography
+                .get("items")?
+                .as_array()?
+                .iter()
+                .flat_map(|b| {
+                    Some::<ResearchItem>(ResearchItem {
+                        id: b["citationKey"].as_str()?.to_string(),
+                        title: b["title"].as_str()?.to_string(),
+                        authors: b["creators"].as_array()?.iter().flat_map(|c| {
+                            if c["creatorType"].as_str()? == "author" {
+                                Some(Author {
+                                    first_name: c["firstName"].as_str()?.to_string(),
+                                    last_name: c["lastName"].as_str()?.to_string()
+                                })
+                            } else {
+                                None
+                            }
+                        }).collect(),
+                        publisher: b["publisher"].as_str().map(|p| p.to_string()),
+                        summary: b["abstractNote"].as_str().map(|p| p.to_string()),
+                        kind: {
+                            let item_type = b["itemType"].as_str()?;
+
+                            // Add space before each uppercase letter
+                            let mut result = String::new();
+                            for (i, c) in item_type.char_indices() {
+                                if i > 0 && c.is_uppercase() {
+                                    result.push(' ');
+                                }
+                                result.push(c);
+                            }
+
+                            // Set first letter to uppercase
+                            let mut chars = result.chars();
+                            match chars.next() {
+                                None => String::new(),
+                                Some(f) => f.to_uppercase().collect::<String>() + chars.as_str(),
+                            }
+                        },
+                        files: vec![],
+                    })
+                })
+                .collect::<Vec<ResearchItem>>(),
+        )
+    }
 }
