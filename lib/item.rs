@@ -2,7 +2,7 @@ use biblatex::{self, ChunksExt};
 use eyre::{Result, eyre};
 use poem_openapi::{Enum, Object};
 use serde_json::Value;
-use std::{fmt::Display, str::FromStr};
+use std::{collections::HashMap, fmt::Display, str::FromStr};
 
 use mime::Mime;
 
@@ -14,7 +14,7 @@ pub trait Bibliography {
     where
         Self: std::marker::Sized;
 
-    fn from_json(bibliography: Value) -> Option<Vec<Self>>
+    fn from_json(bibliography: &Value) -> Option<HashMap<u64, Self>>
     where
         Self: std::marker::Sized;
 }
@@ -60,12 +60,28 @@ impl FromStr for ItemType {
 }
 
 /// Represents an author of a research item.
-#[derive(Object)]
+#[derive(Object, Clone, Debug)]
 pub struct Author {
     /// The first name of the author.
     pub first_name: String,
     /// The last name of the author.
     pub last_name: String,
+}
+
+impl Author {
+    /// Returns id of the author generated from the author name
+    pub fn get_id(&self) -> String {
+        format!(
+            "{}_{}",
+            self.last_name.to_lowercase(),
+            self.first_name.to_lowercase()
+        )
+    }
+
+    /// Returns author name as string
+    pub fn get_name(&self) -> String {
+        format!("{}, {}", self.last_name, self.first_name)
+    }
 }
 
 /// Represents the type of a file associated with a research item.
@@ -105,12 +121,12 @@ impl FromStr for FileType {
 }
 
 /// Represents a file associated with a research item.
+#[derive(Clone, Debug)]
 pub struct File {
     /// The unique identifier/path for the file.
     pub id: String,
     /// The MIME type of the file.
     pub mime_type: Mime,
-
     // The kind of the file (e.g., document, snapshot).
     // TODO: pub kind: FileType,
 }
@@ -125,13 +141,13 @@ impl File {
     /// # Returns
     ///
     /// A `String` representing the URL to access the file.
-    pub fn get_url(&self, item_id: String) -> String {
+    pub fn get_url(&self) -> String {
         format!("/content/{}", self.id)
     }
 }
 
 /// Represents a research item, such as an article or paper.
-#[derive(Default, Object)]
+#[derive(Default, Object, Clone, Debug)]
 pub struct ResearchItem {
     /// The unique identifier for the research item (usually the key in the bibtex format)
     pub id: String,
@@ -185,7 +201,7 @@ impl Bibliography for ResearchItem {
             .collect::<Vec<ResearchItem>>()
     }
 
-    fn from_json(bibliography: Value) -> Option<Vec<Self>>
+    fn from_json(bibliography: &Value) -> Option<HashMap<u64, Self>>
     where
         Self: std::marker::Sized,
     {
@@ -195,63 +211,69 @@ impl Bibliography for ResearchItem {
                 .as_array()?
                 .iter()
                 .flat_map(|b| {
-                    Some::<ResearchItem>(ResearchItem {
-                        id: b["citationKey"].as_str()?.to_string(),
-                        title: b["title"].as_str()?.to_string(),
-                        authors: b["creators"]
-                            .as_array()?
-                            .iter()
-                            .flat_map(|c| {
-                                if c["creatorType"].as_str()? == "author" {
-                                    Some(Author {
-                                        first_name: c["firstName"].as_str()?.to_string(),
-                                        last_name: c["lastName"].as_str()?.to_string(),
-                                    })
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect(),
-                        publisher: b["publisher"].as_str().map(|p| p.to_string()),
-                        summary: b["abstractNote"].as_str().map(|p| p.to_string()),
-                        kind: {
-                            let item_type = b["itemType"].as_str()?;
-
-                            // Add space before each uppercase letter
-                            let mut result = String::new();
-                            for (i, c) in item_type.char_indices() {
-                                if i > 0 && c.is_uppercase() {
-                                    result.push(' ');
-                                }
-                                result.push(c);
-                            }
-
-                            // Set first letter to uppercase
-                            let mut chars = result.chars();
-                            match chars.next() {
-                                None => String::new(),
-                                Some(f) => f.to_uppercase().collect::<String>() + chars.as_str(),
-                            }
-                        },
-                        files: b["attachments"]
-                            .as_array()?
-                            .iter()
-                            .flat_map(|f| {
-                                let abs_path = f["path"].as_str()?.to_string();
-                                let idx = abs_path.find("storage/")?;
-
-                                let path = abs_path.split_at(idx + "storage/".len()).1.to_string();
-                                let mime_guess = mime_guess::from_path(&path);
-
-                                Some(File {
-                                    id: path,
-                                    mime_type: mime_guess.first_or_octet_stream()
+                    Some::<(u64, ResearchItem)>((
+                        b.get("itemID")?.as_u64()?,
+                        ResearchItem {
+                            id: b["citationKey"].as_str()?.to_string(),
+                            title: b["title"].as_str()?.to_string(),
+                            authors: b["creators"]
+                                .as_array()?
+                                .iter()
+                                .flat_map(|c| {
+                                    if c["creatorType"].as_str()? == "author" {
+                                        Some(Author {
+                                            first_name: c["firstName"].as_str()?.to_string(),
+                                            last_name: c["lastName"].as_str()?.to_string(),
+                                        })
+                                    } else {
+                                        None
+                                    }
                                 })
-                            })
-                            .collect::<Vec<File>>(),
-                    })
+                                .collect(),
+                            publisher: b["publisher"].as_str().map(|p| p.to_string()),
+                            summary: b["abstractNote"].as_str().map(|p| p.to_string()),
+                            kind: {
+                                let item_type = b["itemType"].as_str()?;
+
+                                // Add space before each uppercase letter
+                                let mut result = String::new();
+                                for (i, c) in item_type.char_indices() {
+                                    if i > 0 && c.is_uppercase() {
+                                        result.push(' ');
+                                    }
+                                    result.push(c);
+                                }
+
+                                // Set first letter to uppercase
+                                let mut chars = result.chars();
+                                match chars.next() {
+                                    None => String::new(),
+                                    Some(f) => {
+                                        f.to_uppercase().collect::<String>() + chars.as_str()
+                                    }
+                                }
+                            },
+                            files: b["attachments"]
+                                .as_array()?
+                                .iter()
+                                .flat_map(|f| {
+                                    let abs_path = f["path"].as_str()?.to_string();
+                                    let idx = abs_path.find("storage/")?;
+
+                                    let path =
+                                        abs_path.split_at(idx + "storage/".len()).1.to_string();
+                                    let mime_guess = mime_guess::from_path(&path);
+
+                                    Some(File {
+                                        id: path,
+                                        mime_type: mime_guess.first_or_octet_stream(),
+                                    })
+                                })
+                                .collect::<Vec<File>>(),
+                        },
+                    ))
                 })
-                .collect::<Vec<ResearchItem>>(),
+                .collect::<HashMap<u64, ResearchItem>>(),
         )
     }
 }

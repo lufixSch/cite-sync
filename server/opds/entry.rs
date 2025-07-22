@@ -29,7 +29,7 @@ impl OpdsEntry for item::ResearchItem {
                 .iter()
                 .map(|file| Link {
                     rel: "http://opds-spec.org/acquisition".into(),
-                    href: file.get_url(self.id.clone()),
+                    href: file.get_url(),
                     mime_type: Some(file.mime_type.essence_str().into()),
                     ..Default::default()
                 })
@@ -55,7 +55,7 @@ impl OpdsEntry for item::ResearchItem {
                     ..Default::default()
                 })
                 .collect(),
-            links: links,
+            links,
             ..Default::default()
         }
     }
@@ -68,7 +68,7 @@ pub struct NavigationEntry {
     /// The title of the entry.
     pub title: String,
     /// A description of the entry.
-    pub description: String,
+    pub description: Option<String>,
     /// The location URL of the entry.
     pub location: String,
 }
@@ -83,9 +83,9 @@ impl OpdsEntry for NavigationEntry {
         Entry {
             title: self.title.clone().into(),
             id: self.id.clone(),
-            content: Some(Content {
+            content: self.description.as_ref().map(|description| Content {
                 content_type: Some("text".into()),
-                value: Some(self.description.clone()),
+                value: Some(description.clone()),
                 ..Default::default()
             }),
             links: vec![Link {

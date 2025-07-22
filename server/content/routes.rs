@@ -8,7 +8,10 @@ use crate::{state::CiteSyncPaths, tags::CategoryTags};
 #[derive(Debug, ApiResponse)]
 enum DownloadFileResponse {
     #[oai(status = 200)]
-    Ok(Attachment<Vec<u8>>),
+    Ok(
+        Attachment<Vec<u8>>,
+        #[oai(header = "Content-Disposition")] String
+    ),
 
     /// File not found
     #[oai(status = 404)]
@@ -47,7 +50,7 @@ impl Router {
         };
 
         match std::fs::read(file_path) {
-            Ok(data) => DownloadFileResponse::Ok(Attachment::new(data)),
+            Ok(data) => DownloadFileResponse::Ok(Attachment::new(data), format!("attachment; filename=\"{}\"", name)),
             Err(_) => DownloadFileResponse::FileReadFailed,
         }
     }
