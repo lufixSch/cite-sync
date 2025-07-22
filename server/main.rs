@@ -73,11 +73,11 @@ struct Args {
     )]
     data_dir: String,
 
-    /// Path to CiteSync data
+    /// Path to CiteSync bibliography file
     #[arg(
         long,
-        help = "Path to CSL Json Bibliography file (relative to data directory)",
-        env = "CITESYNC_DATA_DIR",
+        help = "Path to BetterBibTex Json Bibliography file (relative to data directory)",
+        env = "CITESYNC_BIB_PATH",
         default_value_t = String::from("sources.json")
     )]
     bib_path: String,

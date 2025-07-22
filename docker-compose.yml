@@ -1,0 +1,10 @@
+services:
+  server:
+    build: .
+    container_name: citesync_server
+    environment:
+      CITESYNC_URL: "http://127.0.0.1:${PORT:-8080}"
+    volumes:
+      - ./data:/app/data
+    ports:
+      - ${PORT:-8080}:3000
