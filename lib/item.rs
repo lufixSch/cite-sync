@@ -162,6 +162,8 @@ pub struct ResearchItem {
     pub publisher: Option<String>,
     /// The type of the research item (e.g., article, miscellaneous).
     pub kind: String, // TODO: ItemKind
+    /// List of tags for this item
+    pub tags: Vec<String>,
 
     /// A list of files associated with the research item.
     #[oai(skip = true)]
@@ -196,6 +198,7 @@ impl Bibliography for ResearchItem {
                     summary: Some(String::from("")), // TODO: b.abstract_()?.parse()?,
                     kind: b.entry_type.to_string(),
                     files: vec![],
+                    tags: vec![]
                 })
             })
             .collect::<Vec<ResearchItem>>()
@@ -270,6 +273,7 @@ impl Bibliography for ResearchItem {
                                     })
                                 })
                                 .collect::<Vec<File>>(),
+                            tags: b["tags"].as_array()?.iter().flat_map(|t| Some(t["tag"].as_str()?.to_string())).collect()
                         },
                     ))
                 })

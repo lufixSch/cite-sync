@@ -11,6 +11,7 @@ use poem_openapi::{
     OpenApi, param,
     payload::{PlainText, Response},
 };
+use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use sqlx::SqlitePool;
 
 use super::{
@@ -57,6 +58,12 @@ impl Router {
                     title: "Collections".into(),
                     description: Some("Grouped by collections".into()),
                     location: "/opds/filter/collections".into(),
+                },
+                NavigationEntry {
+                    id: "tags".into(),
+                    title: "Tags".into(),
+                    description: Some("Grouped by Tags".into()),
+                    location: "/opds/filter/tags".into(),
                 },
             ],
         );
@@ -148,7 +155,6 @@ impl Router {
                 StatusCode::INTERNAL_SERVER_ERROR,
             ))?
             .into_values()
-            .into_iter()
             .collect();
 
         entries.sort_by(|a: &ResearchItem, b| a.title.cmp(&b.title));
@@ -260,7 +266,7 @@ impl Router {
                 "Unable to deserialize bibliography!",
                 StatusCode::INTERNAL_SERVER_ERROR,
             ))?
-            .into_iter()
+            .into_par_iter()
             .flat_map(|(_, e)| {
                 if e.authors
                     .iter()
@@ -416,7 +422,7 @@ impl Router {
                     parent: Some("/opds/filter/collections".into()),
                 },
                 subcollections
-                    .iter()
+                    .par_iter()
                     .flat_map(|e| e.as_str())
                     .flat_map(|e| {
                         let subcollection = collections.get(e)?;
@@ -435,7 +441,7 @@ impl Router {
                 .get("items")
                 .and_then(|c| c.as_array())
                 .unwrap_or(&empty_subcollections)
-                .iter()
+                .par_iter()
                 .flat_map(|id| id.as_u64())
                 .collect::<Vec<u64>>();
 
@@ -444,7 +450,7 @@ impl Router {
                     "Unable to deserialize bibliography!",
                     StatusCode::INTERNAL_SERVER_ERROR,
                 ))?
-                .into_iter()
+                .into_par_iter()
                 .flat_map(|(item_id, e)| {
                     if items.contains(&item_id) {
                         Some(e)
@@ -464,6 +470,117 @@ impl Router {
                 entries,
             )
         };
+
+        match catalog::serialize(feed) {
+            Ok(feed_str) => {
+                Ok(Response::new(PlainText(feed_str)).header("Content-type", "text/xml"))
+            }
+            Err(_) => Err(Error::from_string(
+                "Unable to serialize feed!",
+                StatusCode::INTERNAL_SERVER_ERROR,
+            )),
+        }
+    }
+
+    /// Endpoint to retrieve catalog of all tags.
+    ///
+    /// # Returns
+    ///
+    /// A `PlainText` response containing the serialized OPDS feed.
+    #[oai(path = "/filter/tags", method = "get")]
+    async fn catalog_filter_tags(
+        &self,
+        Data(paths): Data<&CiteSyncPaths>,
+    ) -> Result<Response<PlainText<String>>> {
+        let path = Path::new(&paths.bib_path);
+        let bibliography = bib::load_json(path).map_err(|e| {
+            Error::from_string(
+                format!("Unable to load bibliography: {e}"),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            )
+        })?;
+
+        let mut entries = ResearchItem::from_json(&bibliography)
+            .ok_or(Error::from_string(
+                "Unable to deserialize bibliography!",
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ))?
+            .into_iter()
+            .flat_map(|(_, e)| e.tags)
+            .collect::<Vec<String>>();
+
+        //entries.sort_by(|(_, a)| );
+        entries.sort();
+        entries.dedup();
+
+        let feed: Feed = NavigationCatalog::build(
+            "tags".into(),
+            "Tags".into(),
+            CatalogLocations {
+                current: "/opds/filter/tags".into(),
+                parent: Some("/opds".into()),
+            },
+            entries
+                .into_par_iter()
+                .map(|t| NavigationEntry {
+                    id: t.clone(),
+                    title: t.clone(),
+                    description: None,
+                    location: format!("/opds/filter/tags/{}", t),
+                })
+                .collect(),
+        );
+
+        match catalog::serialize(feed) {
+            Ok(feed_str) => {
+                Ok(Response::new(PlainText(feed_str)).header("Content-type", "text/xml"))
+            }
+            Err(_) => Err(Error::from_string(
+                "Unable to serialize feed!",
+                StatusCode::INTERNAL_SERVER_ERROR,
+            )),
+        }
+    }
+
+    /// Endpoint to retrieve catalog of a specific tag
+    ///
+    /// # Returns
+    ///
+    /// A `PlainText` response containing the serialized OPDS feed.
+    #[oai(path = "/filter/tags/:id", method = "get")]
+    async fn catalog_filter_tag(
+        &self,
+        Data(paths): Data<&CiteSyncPaths>,
+        param::Path(id): param::Path<String>,
+    ) -> Result<Response<PlainText<String>>> {
+        let path = Path::new(&paths.bib_path);
+        let bibliography = bib::load_json(path).map_err(|e| {
+            Error::from_string(
+                format!("Unable to load bibliography: {e}"),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            )
+        })?;
+
+        let mut entries = ResearchItem::from_json(&bibliography)
+            .ok_or(Error::from_string(
+                "Unable to deserialize bibliography!",
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ))?
+            .into_par_iter()
+            .flat_map(|(_, e)| if e.tags.contains(&id) { Some(e) } else { None })
+            .collect::<Vec<ResearchItem>>();
+
+        entries.sort_by(|a: &ResearchItem, b| a.title.cmp(&b.title));
+
+        let feed: Feed = AcquisitionCatalog::build(
+            format!("authors/{id}"),
+            "Author".into(),
+            CatalogLocations {
+                current: format!("/opds/filter/tags/{id}"),
+                parent: Some("/opds/filter/tags".into()),
+            },
+            entries,
+        );
 
         match catalog::serialize(feed) {
             Ok(feed_str) => {
