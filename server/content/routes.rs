@@ -10,7 +10,7 @@ enum DownloadFileResponse {
     #[oai(status = 200)]
     Ok(
         Attachment<Vec<u8>>,
-        #[oai(header = "Content-Disposition")] String
+        #[oai(header = "Content-Disposition")] String,
     ),
 
     /// File not found
@@ -31,14 +31,16 @@ impl Router {
     /// # Returns
     ///
     /// The downloadable file
-    #[oai(path = "/:dir/:name", method = "get")]
+    #[oai(path = "/:collection/:dir/:name", method = "get")]
     async fn download(
         &self,
+        param::Path(collection): param::Path<String>,
         param::Path(dir): param::Path<String>,
         param::Path(name): param::Path<String>,
         Data(paths): Data<&CiteSyncPaths>,
     ) -> DownloadFileResponse {
         let file_path = Path::new(&paths.data_dir)
+            .join(&collection)
             .join("storage")
             .join(&dir)
             .join(&name);
@@ -50,7 +52,10 @@ impl Router {
         };
 
         match std::fs::read(file_path) {
-            Ok(data) => DownloadFileResponse::Ok(Attachment::new(data), format!("attachment; filename=\"{}\"", name)),
+            Ok(data) => DownloadFileResponse::Ok(
+                Attachment::new(data),
+                format!("attachment; filename=\"{}\"", name),
+            ),
             Err(_) => DownloadFileResponse::FileReadFailed,
         }
     }

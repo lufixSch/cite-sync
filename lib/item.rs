@@ -1,6 +1,7 @@
 use biblatex::{self, ChunksExt};
 use eyre::{Result, eyre};
 use poem_openapi::{Enum, Object};
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use serde_json::Value;
 use std::{collections::HashMap, fmt::Display, str::FromStr};
 
@@ -10,11 +11,15 @@ use crate::errors::EnumConversionError;
 
 /// Trait for creating instances from bibliography data.
 pub trait Bibliography {
-    fn from_bib(bibliography: biblatex::Bibliography) -> Vec<Self>
+    fn from_bib(bibliography: biblatex::Bibliography, collection: &str) -> Vec<Self>
     where
         Self: std::marker::Sized;
 
-    fn from_json(bibliography: &Value) -> Option<HashMap<u64, Self>>
+    fn from_json(bibliography: &Value, collection: &str) -> Option<HashMap<u64, Self>>
+    where
+        Self: std::marker::Sized;
+
+    fn from_json_collections(bibliographies: &HashMap<String, Value>) -> HashMap<u64, Self>
     where
         Self: std::marker::Sized;
 }
@@ -141,8 +146,8 @@ impl File {
     /// # Returns
     ///
     /// A `String` representing the URL to access the file.
-    pub fn get_url(&self) -> String {
-        format!("/content/{}", self.id)
+    pub fn get_url(&self, collection: &str) -> String {
+        format!("/content/{}/{}", collection, self.id)
     }
 }
 
@@ -151,6 +156,8 @@ impl File {
 pub struct ResearchItem {
     /// The unique identifier for the research item (usually the key in the bibtex format)
     pub id: String,
+    /// Name of the base collection
+    pub collection: String,
 
     /// A list of authors of the research item.
     pub authors: Vec<Author>,
@@ -171,7 +178,7 @@ pub struct ResearchItem {
 }
 
 impl Bibliography for ResearchItem {
-    fn from_bib(bibliography: biblatex::Bibliography) -> Vec<Self>
+    fn from_bib(bibliography: biblatex::Bibliography, collection: &str) -> Vec<Self>
     where
         Self: std::marker::Sized,
     {
@@ -180,6 +187,7 @@ impl Bibliography for ResearchItem {
             .flat_map(|b| {
                 Ok::<ResearchItem, eyre::Report>(ResearchItem {
                     id: b.key.clone(),
+                    collection: collection.into(),
                     title: b
                         .title()
                         .map_err(|_| eyre!("Bibliography Item has no Title"))?
@@ -198,13 +206,13 @@ impl Bibliography for ResearchItem {
                     summary: Some(String::from("")), // TODO: b.abstract_()?.parse()?,
                     kind: b.entry_type.to_string(),
                     files: vec![],
-                    tags: vec![]
+                    tags: vec![],
                 })
             })
             .collect::<Vec<ResearchItem>>()
     }
 
-    fn from_json(bibliography: &Value) -> Option<HashMap<u64, Self>>
+    fn from_json(bibliography: &Value, collection: &str) -> Option<HashMap<u64, Self>>
     where
         Self: std::marker::Sized,
     {
@@ -212,12 +220,13 @@ impl Bibliography for ResearchItem {
             bibliography
                 .get("items")?
                 .as_array()?
-                .iter()
+                .par_iter()
                 .flat_map(|b| {
                     Some::<(u64, ResearchItem)>((
                         b.get("itemID")?.as_u64()?,
                         ResearchItem {
                             id: b["citationKey"].as_str()?.to_string(),
+                            collection: collection.into(),
                             title: b["title"].as_str()?.to_string(),
                             authors: b["creators"]
                                 .as_array()?
@@ -273,11 +282,28 @@ impl Bibliography for ResearchItem {
                                     })
                                 })
                                 .collect::<Vec<File>>(),
-                            tags: b["tags"].as_array()?.iter().flat_map(|t| Some(t["tag"].as_str()?.to_string())).collect()
+                            tags: b["tags"]
+                                .as_array()?
+                                .iter()
+                                .flat_map(|t| Some(t["tag"].as_str()?.to_string()))
+                                .collect(),
                         },
                     ))
                 })
                 .collect::<HashMap<u64, ResearchItem>>(),
         )
+    }
+
+
+    /// NOTE: unparsable collections will be skipped
+    fn from_json_collections(bibliographies: &HashMap<String, Value>) -> HashMap<u64, Self>
+    where
+        Self: std::marker::Sized,
+    {
+        bibliographies
+            .par_iter()
+            .flat_map(|(collection, bibliography)| Self::from_json(bibliography, collection))
+            .flatten()
+            .collect::<HashMap<u64, ResearchItem>>()
     }
 }

@@ -29,7 +29,7 @@ impl OpdsEntry for item::ResearchItem {
                 .iter()
                 .map(|file| Link {
                     rel: "http://opds-spec.org/acquisition".into(),
-                    href: file.get_url(),
+                    href: file.get_url(&self.collection),
                     mime_type: Some(file.mime_type.essence_str().into()),
                     ..Default::default()
                 })

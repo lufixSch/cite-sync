@@ -1,6 +1,10 @@
 use std::path::Path;
 
-use poem::{listener::TcpListener, middleware::{Cors, Tracing}, EndpointExt, Route};
+use poem::{
+    EndpointExt, Route,
+    listener::TcpListener,
+    middleware::{Cors, Tracing},
+};
 use poem_openapi::OpenApiService;
 
 use clap::Parser;
@@ -73,14 +77,14 @@ struct Args {
     )]
     data_dir: String,
 
-    /// Path to CiteSync bibliography file
+    /// Expected name of the bibliography file
     #[arg(
         long,
-        help = "Path to BetterBibTex Json Bibliography file (relative to data directory)",
-        env = "CITESYNC_BIB_PATH",
+        help = "Expected name of the bibliography file",
+        env = "CITESYNC_BIB_NAME",
         default_value_t = String::from("sources.json")
     )]
-    bib_path: String,
+    bib_name: String,
 }
 
 #[tokio::main]
@@ -118,14 +122,9 @@ async fn main() -> Result<()> {
         server = server.nest("docs", docs);
     }
 
-    let bib_path = Path::new(&args.data_dir)
-        .join(args.bib_path)
-        .to_string_lossy()
-        .to_string();
-
     let paths = state::CiteSyncPaths {
         data_dir: args.data_dir,
-        bib_path,
+        bib_name: args.bib_name
     };
 
     // Start the server with CORS middleware enabled.

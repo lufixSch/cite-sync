@@ -139,21 +139,17 @@ impl Router {
     // }
     async fn catalog_by_name(
         &self,
-        paths: Data<&CiteSyncPaths>,
+        Data(paths): Data<&CiteSyncPaths>,
     ) -> Result<Response<PlainText<String>>> {
-        let path = Path::new(&paths.0.bib_path);
-        let bibliography = bib::load_json(path).map_err(|e| {
+        let path = Path::new(&paths.data_dir);
+        let bibliographies = bib::load_dir(path, &paths.bib_name).map_err(|e| {
             Error::from_string(
                 format!("Unable to load bibliography: {e}"),
                 StatusCode::INTERNAL_SERVER_ERROR,
             )
         })?;
 
-        let mut entries: Vec<ResearchItem> = Bibliography::from_json(&bibliography)
-            .ok_or(Error::from_string(
-                "Unable to deserialize bibliography!",
-                StatusCode::INTERNAL_SERVER_ERROR,
-            ))?
+        let mut entries: Vec<ResearchItem> = ResearchItem::from_json_collections(&bibliographies)
             .into_values()
             .collect();
 
@@ -190,26 +186,22 @@ impl Router {
         &self,
         Data(paths): Data<&CiteSyncPaths>,
     ) -> Result<Response<PlainText<String>>> {
-        let path = Path::new(&paths.bib_path);
-        let bibliography = bib::load_json(path).map_err(|e| {
+        let path = Path::new(&paths.data_dir);
+        let bibliographies = bib::load_dir(path, &paths.bib_name).map_err(|e| {
             Error::from_string(
                 format!("Unable to load bibliography: {e}"),
                 StatusCode::INTERNAL_SERVER_ERROR,
             )
         })?;
 
-        let mut entries = ResearchItem::from_json(&bibliography)
-            .ok_or(Error::from_string(
-                "Unable to deserialize bibliography!",
-                StatusCode::INTERNAL_SERVER_ERROR,
-            ))?
-            .iter()
-            .flat_map(|(_, e)| &e.authors)
-            .map(|a| (a.get_id(), a.get_name()))
-            .collect::<Vec<(String, String)>>();
+        let mut entries: Vec<(String, String)> =
+            ResearchItem::from_json_collections(&bibliographies)
+                .par_iter()
+                .flat_map(|(_, e)| &e.authors)
+                .map(|a| (a.get_id(), a.get_name()))
+                .collect::<Vec<(String, String)>>();
 
-        //entries.sort_by(|(_, a)| );
-        entries.sort();
+        entries.sort_by(|(_, a), (_, b)| a.cmp(b));
         entries.dedup();
 
         let feed: Feed = NavigationCatalog::build(
@@ -253,19 +245,15 @@ impl Router {
         Data(paths): Data<&CiteSyncPaths>,
         param::Path(id): param::Path<String>,
     ) -> Result<Response<PlainText<String>>> {
-        let path = Path::new(&paths.bib_path);
-        let bibliography = bib::load_json(path).map_err(|e| {
+        let path = Path::new(&paths.data_dir);
+        let bibliographies = bib::load_dir(path, &paths.bib_name).map_err(|e| {
             Error::from_string(
                 format!("Unable to load bibliography: {e}"),
                 StatusCode::INTERNAL_SERVER_ERROR,
             )
         })?;
 
-        let mut entries = ResearchItem::from_json(&bibliography)
-            .ok_or(Error::from_string(
-                "Unable to deserialize bibliography!",
-                StatusCode::INTERNAL_SERVER_ERROR,
-            ))?
+        let mut entries: Vec<ResearchItem> = ResearchItem::from_json_collections(&bibliographies)
             .into_par_iter()
             .flat_map(|(_, e)| {
                 if e.authors
@@ -304,7 +292,7 @@ impl Router {
         }
     }
 
-    /// Endpoint to retrieve catalog of all (base) collections.
+    /// Endpoint to retrieve catalog of all base collections.
     ///
     /// # Returns
     ///
@@ -314,33 +302,21 @@ impl Router {
         &self,
         Data(paths): Data<&CiteSyncPaths>,
     ) -> Result<Response<PlainText<String>>> {
-        let path = Path::new(&paths.bib_path);
-        let bibliography = bib::load_json(path).map_err(|e| {
+        let path = Path::new(&paths.data_dir);
+        let bibliographies = bib::load_dir(path, &paths.bib_name).map_err(|e| {
             Error::from_string(
                 format!("Unable to load bibliography: {e}"),
                 StatusCode::INTERNAL_SERVER_ERROR,
             )
         })?;
 
-        let mut entries = bibliography
-            .get("collections")
-            .and_then(|c| c.as_object())
-            .ok_or(Error::from_string(
-                "Unable to deserialize collections!",
-                StatusCode::INTERNAL_SERVER_ERROR,
-            ))?
-            .into_iter()
-            .flat_map(|(id, c)| {
-                if c["parent"] == "" {
-                    Some(NavigationEntry {
-                        id: id.clone(),
-                        title: c["name"].as_str()?.into(),
-                        description: None,
-                        location: format!("/opds/filter/collections/{}", id),
-                    })
-                } else {
-                    None
-                }
+        let mut entries = bibliographies
+            .into_keys()
+            .map(|c| NavigationEntry {
+                id: c.clone(),
+                title: c.clone(),
+                description: None,
+                location: format!("/opds/filter/collections/{c}"),
             })
             .collect::<Vec<NavigationEntry>>();
 
@@ -367,24 +343,99 @@ impl Router {
         }
     }
 
-    /// Endpoint to retrieve catalog of all collections (subcollections or content).
+    /// Endpoint to retrieve catalog of one base collection.
     ///
     /// # Returns
     ///
     /// A `PlainText` response containing the serialized OPDS feed.
-    #[oai(path = "/filter/collections/:id", method = "get")]
-    async fn catalog_filter_collection(
+    #[oai(path = "/filter/collections/:base", method = "get")]
+    async fn catalog_filter_collection_base(
         &self,
         Data(paths): Data<&CiteSyncPaths>,
-        param::Path(id): param::Path<String>,
+        param::Path(base): param::Path<String>,
     ) -> Result<Response<PlainText<String>>> {
-        let path = Path::new(&paths.bib_path);
-        let bibliography = bib::load_json(path).map_err(|e| {
+        let path = Path::new(&paths.data_dir);
+        let bibliographies = bib::load_dir(path, &paths.bib_name).map_err(|e| {
             Error::from_string(
                 format!("Unable to load bibliography: {e}"),
                 StatusCode::INTERNAL_SERVER_ERROR,
             )
         })?;
+
+        let mut entries = bibliographies
+            .get(&base)
+            .ok_or(Error::from_string(
+                "Base collection not found!",
+                StatusCode::NOT_FOUND,
+            ))?
+            .get("collections")
+            .and_then(|c| c.as_object())
+            .ok_or(Error::from_string(
+                "Unable to deserialize collections!",
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ))?
+            .into_iter()
+            .flat_map(|(id, c)| {
+                if c["parent"] == "" {
+                    Some(NavigationEntry {
+                        id: id.clone(),
+                        title: c["name"].as_str()?.into(),
+                        description: None,
+                        location: format!("/opds/filter/collections/{}/{}", base, id),
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<NavigationEntry>>();
+
+        entries.sort_by(|a, b| a.title.cmp(&b.title));
+
+        let feed: Feed = NavigationCatalog::build(
+            "collections".into(),
+            "Collections".into(),
+            CatalogLocations {
+                current: format!("/opds/filter/collections/{base}"),
+                parent: Some("/opds/filter/collections".into()),
+            },
+            entries,
+        );
+
+        match catalog::serialize(feed) {
+            Ok(feed_str) => {
+                Ok(Response::new(PlainText(feed_str)).header("Content-type", "text/xml"))
+            }
+            Err(_) => Err(Error::from_string(
+                "Unable to serialize feed!",
+                StatusCode::INTERNAL_SERVER_ERROR,
+            )),
+        }
+    }
+
+    /// Endpoint to retrieve catalog of all collections (subcollections or content).
+    ///
+    /// # Returns
+    ///
+    /// A `PlainText` response containing the serialized OPDS feed.
+    #[oai(path = "/filter/collections/:base/:id", method = "get")]
+    async fn catalog_filter_collection(
+        &self,
+        Data(paths): Data<&CiteSyncPaths>,
+        param::Path(base): param::Path<String>,
+        param::Path(id): param::Path<String>,
+    ) -> Result<Response<PlainText<String>>> {
+        let path = Path::new(&paths.data_dir);
+        let bibliographies = bib::load_dir(path, &paths.bib_name).map_err(|e| {
+            Error::from_string(
+                format!("Unable to load bibliography: {e}"),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            )
+        })?;
+
+        let bibliography = bibliographies.get(&base).ok_or(Error::from_string(
+            "Base collection not found!",
+            StatusCode::NOT_FOUND,
+        ))?;
 
         let collections = bibliography
             .get("collections")
@@ -418,8 +469,8 @@ impl Router {
                 format!("collections/{id}"),
                 name,
                 CatalogLocations {
-                    current: format!("/opds/filter/collections/{id}"),
-                    parent: Some("/opds/filter/collections".into()),
+                    current: format!("/opds/filter/collections/{base}/{id}"),
+                    parent: Some(format!("/opds/filter/collections/{base}")),
                 },
                 subcollections
                     .par_iter()
@@ -431,7 +482,7 @@ impl Router {
                             id: e.into(),
                             title: subcollection["name"].as_str()?.into(),
                             description: None,
-                            location: format!("/opds/filter/collections/{}", e),
+                            location: format!("/opds/filter/collections/{}/{}", base, e),
                         })
                     })
                     .collect(),
@@ -445,7 +496,7 @@ impl Router {
                 .flat_map(|id| id.as_u64())
                 .collect::<Vec<u64>>();
 
-            let entries: Vec<ResearchItem> = ResearchItem::from_json(&bibliography)
+            let entries: Vec<ResearchItem> = ResearchItem::from_json(&bibliography, &base)
                 .ok_or(Error::from_string(
                     "Unable to deserialize bibliography!",
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -492,20 +543,16 @@ impl Router {
         &self,
         Data(paths): Data<&CiteSyncPaths>,
     ) -> Result<Response<PlainText<String>>> {
-        let path = Path::new(&paths.bib_path);
-        let bibliography = bib::load_json(path).map_err(|e| {
+        let path = Path::new(&paths.data_dir);
+        let bibliographies = bib::load_dir(path, &paths.bib_name).map_err(|e| {
             Error::from_string(
                 format!("Unable to load bibliography: {e}"),
                 StatusCode::INTERNAL_SERVER_ERROR,
             )
         })?;
 
-        let mut entries = ResearchItem::from_json(&bibliography)
-            .ok_or(Error::from_string(
-                "Unable to deserialize bibliography!",
-                StatusCode::INTERNAL_SERVER_ERROR,
-            ))?
-            .into_iter()
+        let mut entries: Vec<String> = ResearchItem::from_json_collections(&bibliographies)
+            .into_par_iter()
             .flat_map(|(_, e)| e.tags)
             .collect::<Vec<String>>();
 
@@ -553,19 +600,15 @@ impl Router {
         Data(paths): Data<&CiteSyncPaths>,
         param::Path(id): param::Path<String>,
     ) -> Result<Response<PlainText<String>>> {
-        let path = Path::new(&paths.bib_path);
-        let bibliography = bib::load_json(path).map_err(|e| {
+        let path = Path::new(&paths.data_dir);
+        let bibliographies = bib::load_dir(path, &paths.bib_name).map_err(|e| {
             Error::from_string(
                 format!("Unable to load bibliography: {e}"),
                 StatusCode::INTERNAL_SERVER_ERROR,
             )
         })?;
 
-        let mut entries = ResearchItem::from_json(&bibliography)
-            .ok_or(Error::from_string(
-                "Unable to deserialize bibliography!",
-                StatusCode::INTERNAL_SERVER_ERROR,
-            ))?
+        let mut entries: Vec<ResearchItem> = ResearchItem::from_json_collections(&bibliographies)
             .into_par_iter()
             .flat_map(|(_, e)| if e.tags.contains(&id) { Some(e) } else { None })
             .collect::<Vec<ResearchItem>>();
