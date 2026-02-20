@@ -19,7 +19,13 @@ path = "server/main.rs"
 [dependencies]
 atom_syndication = "0.12.7"
 biblatex = "0.10.0"
-clap = { version = "4.5.40", features = ["suggestions", "color", "cargo", "derive", "env"] }
+clap = { version = "4.5.40", features = [
+    "suggestions",
+    "color",
+    "cargo",
+    "derive",
+    "env",
+] }
 color-eyre = "0.6.5"
 confy = "1.0.0"
 directories-next = "2.0.0"

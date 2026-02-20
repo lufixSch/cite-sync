@@ -67,8 +67,7 @@ impl Router {
                 },
             ],
         );
-
-        match catalog::serialize(feed) {
+match catalog::serialize(feed) {
             Ok(feed_str) => {
                 Ok(Response::new(PlainText(feed_str)).header("Content-type", "text/xml"))
             }
