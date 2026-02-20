@@ -1,25 +1,19 @@
-use std::{path::Path, str::FromStr};
-
 use atom_syndication::Feed;
-use eyre::eyre;
-use libcitesync::{
-    bib,
-    item::{Bibliography, ItemType, ResearchItem},
-};
+use libcitesync::item::ResearchItem;
 use poem::{Error, Result, http::StatusCode, web::Data};
 use poem_openapi::{
     OpenApi, param,
     payload::{PlainText, Response},
 };
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
-use sqlx::SqlitePool;
+use serde_json::Value;
 
 use super::{
     catalog::{self, AcquisitionCatalog, CatalogLocations, NavigationCatalog, OpdsCatalog},
     entry::NavigationEntry,
 };
 
-use crate::{state::CiteSyncPaths, tags::CategoryTags};
+use crate::{state::AppState, tags::CategoryTags};
 
 /// Root router for handling OPDS API requests.
 pub struct Router;
@@ -67,7 +61,7 @@ impl Router {
                 },
             ],
         );
-match catalog::serialize(feed) {
+        match catalog::serialize(feed) {
             Ok(feed_str) => {
                 Ok(Response::new(PlainText(feed_str)).header("Content-type", "text/xml"))
             }
@@ -138,19 +132,18 @@ match catalog::serialize(feed) {
     // }
     async fn catalog_by_name(
         &self,
-        Data(paths): Data<&CiteSyncPaths>,
+        Data(state): Data<&AppState>,
     ) -> Result<Response<PlainText<String>>> {
-        let path = Path::new(&paths.data_dir);
-        let bibliographies = bib::load_dir(path, &paths.bib_name).map_err(|e| {
+        let bib_guard = state.get_bibliography().await.map_err(|e| {
             Error::from_string(
                 format!("Unable to load bibliography: {e}"),
                 StatusCode::INTERNAL_SERVER_ERROR,
             )
         })?;
 
-        let mut entries: Vec<ResearchItem> = ResearchItem::from_json_collections(&bibliographies)
-            .into_values()
-            .collect();
+        let bib = bib_guard.read().await;
+
+        let mut entries: Vec<ResearchItem> = bib.research_items.values().cloned().collect();
 
         entries.sort_by(|a: &ResearchItem, b| a.title.cmp(&b.title));
 
@@ -183,22 +176,22 @@ match catalog::serialize(feed) {
     #[oai(path = "/filter/authors", method = "get")]
     async fn catalog_filter_authors(
         &self,
-        Data(paths): Data<&CiteSyncPaths>,
+        Data(state): Data<&AppState>,
     ) -> Result<Response<PlainText<String>>> {
-        let path = Path::new(&paths.data_dir);
-        let bibliographies = bib::load_dir(path, &paths.bib_name).map_err(|e| {
+        let bib_guard = state.get_bibliography().await.map_err(|e| {
             Error::from_string(
                 format!("Unable to load bibliography: {e}"),
                 StatusCode::INTERNAL_SERVER_ERROR,
             )
         })?;
 
-        let mut entries: Vec<(String, String)> =
-            ResearchItem::from_json_collections(&bibliographies)
-                .par_iter()
-                .flat_map(|(_, e)| &e.authors)
-                .map(|a| (a.get_id(), a.get_name()))
-                .collect::<Vec<(String, String)>>();
+        let bib = bib_guard.read().await;
+
+        let mut entries: Vec<(String, String)> = bib
+            .authors
+            .iter()
+            .map(|(author_id, (author_name, _))| (author_id.clone(), author_name.clone()))
+            .collect::<Vec<(String, String)>>();
 
         entries.sort_by(|(_, a), (_, b)| a.cmp(b));
         entries.dedup();
@@ -241,38 +234,33 @@ match catalog::serialize(feed) {
     #[oai(path = "/filter/authors/:id", method = "get")]
     async fn catalog_filter_author(
         &self,
-        Data(paths): Data<&CiteSyncPaths>,
+        Data(state): Data<&AppState>,
         param::Path(id): param::Path<String>,
     ) -> Result<Response<PlainText<String>>> {
-        let path = Path::new(&paths.data_dir);
-        let bibliographies = bib::load_dir(path, &paths.bib_name).map_err(|e| {
+        let bib_guard = state.get_bibliography().await.map_err(|e| {
             Error::from_string(
                 format!("Unable to load bibliography: {e}"),
                 StatusCode::INTERNAL_SERVER_ERROR,
             )
         })?;
 
-        let mut entries: Vec<ResearchItem> = ResearchItem::from_json_collections(&bibliographies)
-            .into_par_iter()
-            .flat_map(|(_, e)| {
-                if e.authors
-                    .iter()
-                    .map(|a| a.get_id())
-                    .collect::<Vec<String>>()
-                    .contains(&id)
-                {
-                    Some(e)
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<ResearchItem>>();
+        let bib = bib_guard.read().await;
+
+        let (author_name, item_ids) = bib.authors.get(&id).ok_or(Error::from_string(
+            "Author not found!",
+            StatusCode::NOT_FOUND,
+        ))?;
+
+        let mut entries: Vec<ResearchItem> = item_ids
+            .par_iter()
+            .filter_map(|item_id| bib.research_items.get(item_id).cloned())
+            .collect();
 
         entries.sort_by(|a: &ResearchItem, b| a.title.cmp(&b.title));
 
         let feed: Feed = AcquisitionCatalog::build(
             format!("authors/{id}"),
-            "Author".into(),
+            author_name.clone(),
             CatalogLocations {
                 current: format!("/opds/filter/authors/{id}"),
                 parent: Some("/opds/filter/authors".into()),
@@ -299,18 +287,20 @@ match catalog::serialize(feed) {
     #[oai(path = "/filter/collections", method = "get")]
     async fn catalog_filter_collections(
         &self,
-        Data(paths): Data<&CiteSyncPaths>,
+        Data(state): Data<&AppState>,
     ) -> Result<Response<PlainText<String>>> {
-        let path = Path::new(&paths.data_dir);
-        let bibliographies = bib::load_dir(path, &paths.bib_name).map_err(|e| {
+        let bib_guard = state.get_bibliography().await.map_err(|e| {
             Error::from_string(
                 format!("Unable to load bibliography: {e}"),
                 StatusCode::INTERNAL_SERVER_ERROR,
             )
         })?;
 
-        let mut entries = bibliographies
-            .into_keys()
+        let bib = bib_guard.read().await;
+
+        let mut entries = bib
+            .collections_metadata
+            .keys()
             .map(|c| NavigationEntry {
                 id: c.clone(),
                 title: c.clone(),
@@ -350,29 +340,36 @@ match catalog::serialize(feed) {
     #[oai(path = "/filter/collections/:base", method = "get")]
     async fn catalog_filter_collection_base(
         &self,
-        Data(paths): Data<&CiteSyncPaths>,
+        Data(state): Data<&AppState>,
         param::Path(base): param::Path<String>,
     ) -> Result<Response<PlainText<String>>> {
-        let path = Path::new(&paths.data_dir);
-        let bibliographies = bib::load_dir(path, &paths.bib_name).map_err(|e| {
+        let bib_guard = state.get_bibliography().await.map_err(|e| {
             Error::from_string(
                 format!("Unable to load bibliography: {e}"),
                 StatusCode::INTERNAL_SERVER_ERROR,
             )
         })?;
 
-        let mut entries = bibliographies
+        let bib = bib_guard.read().await;
+
+        let metadata = bib
+            .collections_metadata
             .get(&base)
             .ok_or(Error::from_string(
                 "Base collection not found!",
                 StatusCode::NOT_FOUND,
-            ))?
-            .get("collections")
+            ))?;
+
+        let collections = metadata
+            .collections_structure
+            .as_ref()
             .and_then(|c| c.as_object())
             .ok_or(Error::from_string(
                 "Unable to deserialize collections!",
                 StatusCode::INTERNAL_SERVER_ERROR,
-            ))?
+            ))?;
+
+        let mut entries = collections
             .into_iter()
             .flat_map(|(id, c)| {
                 if c["parent"] == "" {
@@ -419,25 +416,30 @@ match catalog::serialize(feed) {
     #[oai(path = "/filter/collections/:base/:id", method = "get")]
     async fn catalog_filter_collection(
         &self,
-        Data(paths): Data<&CiteSyncPaths>,
+        Data(state): Data<&AppState>,
         param::Path(base): param::Path<String>,
         param::Path(id): param::Path<String>,
     ) -> Result<Response<PlainText<String>>> {
-        let path = Path::new(&paths.data_dir);
-        let bibliographies = bib::load_dir(path, &paths.bib_name).map_err(|e| {
+        let bib_guard = state.get_bibliography().await.map_err(|e| {
             Error::from_string(
                 format!("Unable to load bibliography: {e}"),
                 StatusCode::INTERNAL_SERVER_ERROR,
             )
         })?;
 
-        let bibliography = bibliographies.get(&base).ok_or(Error::from_string(
-            "Base collection not found!",
-            StatusCode::NOT_FOUND,
-        ))?;
+        let bib = bib_guard.read().await;
 
-        let collections = bibliography
-            .get("collections")
+        let metadata = bib
+            .collections_metadata
+            .get(&base)
+            .ok_or(Error::from_string(
+                "Base collection not found!",
+                StatusCode::NOT_FOUND,
+            ))?;
+
+        let collections = metadata
+            .collections_structure
+            .as_ref()
             .and_then(|c| c.as_object())
             .ok_or(Error::from_string(
                 "Unable to deserialize collections!",
@@ -473,7 +475,7 @@ match catalog::serialize(feed) {
                 },
                 subcollections
                     .par_iter()
-                    .flat_map(|e| e.as_str())
+                    .flat_map(|e: &Value| e.as_str())
                     .flat_map(|e| {
                         let subcollection = collections.get(e)?;
 
@@ -492,22 +494,12 @@ match catalog::serialize(feed) {
                 .and_then(|c| c.as_array())
                 .unwrap_or(&empty_subcollections)
                 .par_iter()
-                .flat_map(|id| id.as_u64())
+                .filter_map(|id: &Value| id.as_u64())
                 .collect::<Vec<u64>>();
 
-            let entries: Vec<ResearchItem> = ResearchItem::from_json(&bibliography, &base)
-                .ok_or(Error::from_string(
-                    "Unable to deserialize bibliography!",
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                ))?
-                .into_par_iter()
-                .flat_map(|(item_id, e)| {
-                    if items.contains(&item_id) {
-                        Some(e)
-                    } else {
-                        None
-                    }
-                })
+            let entries: Vec<ResearchItem> = items
+                .par_iter()
+                .filter_map(|item_id| bib.research_items.get(item_id).cloned())
                 .collect();
 
             AcquisitionCatalog::build(
@@ -540,24 +532,20 @@ match catalog::serialize(feed) {
     #[oai(path = "/filter/tags", method = "get")]
     async fn catalog_filter_tags(
         &self,
-        Data(paths): Data<&CiteSyncPaths>,
+        Data(state): Data<&AppState>,
     ) -> Result<Response<PlainText<String>>> {
-        let path = Path::new(&paths.data_dir);
-        let bibliographies = bib::load_dir(path, &paths.bib_name).map_err(|e| {
+        let bib_guard = state.get_bibliography().await.map_err(|e| {
             Error::from_string(
                 format!("Unable to load bibliography: {e}"),
                 StatusCode::INTERNAL_SERVER_ERROR,
             )
         })?;
 
-        let mut entries: Vec<String> = ResearchItem::from_json_collections(&bibliographies)
-            .into_par_iter()
-            .flat_map(|(_, e)| e.tags)
-            .collect::<Vec<String>>();
+        let bib = bib_guard.read().await;
 
-        //entries.sort_by(|(_, a)| );
+        let mut entries: Vec<String> = bib.tags.keys().cloned().collect();
+
         entries.sort();
-        entries.dedup();
 
         let feed: Feed = NavigationCatalog::build(
             "tags".into(),
@@ -596,27 +584,33 @@ match catalog::serialize(feed) {
     #[oai(path = "/filter/tags/:id", method = "get")]
     async fn catalog_filter_tag(
         &self,
-        Data(paths): Data<&CiteSyncPaths>,
+        Data(state): Data<&AppState>,
         param::Path(id): param::Path<String>,
     ) -> Result<Response<PlainText<String>>> {
-        let path = Path::new(&paths.data_dir);
-        let bibliographies = bib::load_dir(path, &paths.bib_name).map_err(|e| {
+        let bib_guard = state.get_bibliography().await.map_err(|e| {
             Error::from_string(
                 format!("Unable to load bibliography: {e}"),
                 StatusCode::INTERNAL_SERVER_ERROR,
             )
         })?;
 
-        let mut entries: Vec<ResearchItem> = ResearchItem::from_json_collections(&bibliographies)
-            .into_par_iter()
-            .flat_map(|(_, e)| if e.tags.contains(&id) { Some(e) } else { None })
-            .collect::<Vec<ResearchItem>>();
+        let bib = bib_guard.read().await;
+
+        let item_ids = bib.tags.get(&id).ok_or(Error::from_string(
+            "Tag not found!",
+            StatusCode::NOT_FOUND,
+        ))?;
+
+        let mut entries: Vec<ResearchItem> = item_ids
+            .par_iter()
+            .filter_map(|item_id| bib.research_items.get(item_id).cloned())
+            .collect();
 
         entries.sort_by(|a: &ResearchItem, b| a.title.cmp(&b.title));
 
         let feed: Feed = AcquisitionCatalog::build(
-            format!("authors/{id}"),
-            "Author".into(),
+            format!("tags/{id}"),
+            id.clone(),
             CatalogLocations {
                 current: format!("/opds/filter/tags/{id}"),
                 parent: Some("/opds/filter/tags".into()),

@@ -3,4 +3,5 @@
 
 .env
 **.db**
-.aider*
+
+.config

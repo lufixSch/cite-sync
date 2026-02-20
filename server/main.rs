@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use poem::{
     EndpointExt, Route,
     listener::TcpListener,
@@ -9,9 +7,8 @@ use poem_openapi::OpenApiService;
 
 use clap::Parser;
 use eyre::{Result, eyre};
-use sqlx::SqlitePool;
 
-use crate::state::CiteSyncPaths;
+use crate::state::{AppState, CiteSyncPaths};
 
 // mod items;
 mod content;
@@ -110,9 +107,7 @@ async fn main() -> Result<()> {
     )
     .server(args.url);
 
-    // let db = SqlitePool::connect(&args.database_url)
-    //     .await
-    //     .map_err(|e| eyre!(format!("Database connection failed with error: {e}")))?;
+
 
     // Generate SwaggerUI documentation for the API.
     let docs = api_service.swagger_ui();
@@ -122,10 +117,12 @@ async fn main() -> Result<()> {
         server = server.nest("docs", docs);
     }
 
-    let paths = state::CiteSyncPaths {
+    let paths = CiteSyncPaths {
         data_dir: args.data_dir,
-        bib_name: args.bib_name
+        bib_name: args.bib_name,
     };
+
+    let app_state = AppState::new(paths).await?;
 
     // Start the server with CORS middleware enabled.
     poem::Server::new(TcpListener::bind(format!("0.0.0.0:{}", args.port)))
@@ -134,7 +131,7 @@ async fn main() -> Result<()> {
                 .with(Cors::new())
                 .with(Tracing)
                 //.data(db)
-                .data(paths),
+                .data(app_state),
         )
         .await
         .map_err(|e| eyre!(format!("Server failed with error: {e}")))
